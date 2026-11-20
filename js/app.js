@@ -209,6 +209,13 @@ function renderHome() {
   totalCard.append(pigImg('pig-peek'));
   view.append(totalCard);
 
+  // お知らせ(月末の更新のすすめ)
+  const due = monthEndDue();
+  if (due) {
+    view.append(h('div', { class: 'notice warn' }, `${monthLabel(due)}の月末の記録がまだです。`,
+      h('button', { class: 'link', type: 'button', onclick: () => updateSheet(due) }, '今すぐ更新する')));
+  }
+
   // お知らせ(バックアップのすすめ)
   if (backupAdvice()) {
     view.append(h('div', { class: 'notice warn' }, backupAdvice(),
@@ -249,6 +256,17 @@ function emptyBox() {
     h('p', {}, 'まだ資産がありません'),
     h('p', { class: 'muted small' }, '預金・現金・株式など、持っているものを1つずつ入れていきましょう。入れた金額は、このスマホの中だけに保存されます。'),
     h('button', { class: 'btn primary', type: 'button', onclick: () => assetSheet(null) }, '＋ 最初の資産を入れる'));
+}
+
+// 月末の更新のすすめ。月末3日前〜翌月5日の間で、その月の記録がまだなければ、その月("YYYY-MM")を返す
+function monthEndDue() {
+  const d = new Date();
+  const day = d.getDate();
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  let target = null;
+  if (day >= lastDay - 2) target = nowMonth();
+  else if (day <= 5) target = addMonths(nowMonth(), -1);
+  return target && !state.records[target] ? target : null;
 }
 
 // バックアップのすすめ(なければ空文字)
@@ -388,10 +406,10 @@ function assetSheet(asset) {
 }
 
 // 「今月の更新」: 全部の資産の金額を1画面でまとめて入れる
-function updateSheet() {
+function updateSheet(initialMonth) {
   if (state.assets.length === 0) { assetSheet(null); return; }
   // 未来の月は選べない(入力ミスで「最新月」がずれるのを防ぐ)
-  const monthInput = h('input', { type: 'month', value: nowMonth(), max: nowMonth(), min: '2000-01', 'aria-label': '対象の月' });
+  const monthInput = h('input', { type: 'month', value: typeof initialMonth === 'string' ? initialMonth : nowMonth(), max: nowMonth(), min: '2000-01', 'aria-label': '対象の月' });
   const rowsBox = h('div', { class: 'update-rows' });
   const err = h('p', { class: 'error', role: 'alert' });
   const maskBox = h('div', {});
