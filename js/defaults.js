@@ -17,6 +17,6 @@ export function emptyState() {
     assets: [],
     records: {},
     // isSample は昔のサンプルデータを自動で消すための印(いまは使わない)
-    settings: { hidden: false, pinHash: null, pinSalt: null, bioId: null, lastBackup: null, isSample: false },
+    settings: { hidden: false, pinHash: null, pinSalt: null, bioId: null, lockDelay: 0, lastBackup: null, isSample: false },
   };
 }

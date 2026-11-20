@@ -400,6 +400,61 @@ function updateSheet() {
 
 // ---------- 画面: 設定 ----------
 function renderSettings() {
+  // 「PINを求めるまでの時間」の欄(PINを設定しているときだけ出る)
+  const DELAY_PRESETS = [[0, 'すぐ(アプリを離れるたび)'], [1, '1分'], [5, '5分'], [15, '15分'], [30, '30分'], [60, '1時間'], [180, '3時間'], [720, '12時間'], [1440, '24時間']];
+  const fmtMinutes = (m) => (m < 60 ? `${m}分` : m % 1440 === 0 ? `${m / 1440}日` : m % 60 === 0 ? `${m / 60}時間` : `${Math.floor(m / 60)}時間${m % 60}分`);
+  function lockDelayBox() {
+    const cur = state.settings.lockDelay || 0;
+    const isPreset = DELAY_PRESETS.some(([m]) => m === cur);
+    const sel = h('select', { 'aria-label': 'PINを求めるまでの時間' },
+      DELAY_PRESETS.map(([m, label]) => h('option', { value: String(m), selected: isPreset && m === cur }, label)),
+      h('option', { value: 'custom', selected: !isPreset }, '自分で指定…'));
+    const num = h('input', { type: 'text', inputmode: 'numeric', maxlength: '5', value: String(cur || 10), 'aria-label': '分数', autocomplete: 'off' });
+    const customRow = h('div', { class: 'custom-delay' }, num, h('span', {}, '分'));
+    customRow.hidden = isPreset;
+    const msg = h('p', { class: 'error', role: 'alert' });
+    const warn = h('p', { class: 'warn-text', role: 'status' });
+    // 長い時間にするほど、ロックの意味が薄くなることを伝える
+    const updateWarn = (m) => {
+      warn.textContent = m >= 60
+        ? `⚠ ${fmtMinutes(m)}のあいだは、アプリを閉じて開き直しても、PINなしで金額が見えます。長いほどロックの意味が薄くなります。`
+        : '';
+    };
+    updateWarn(cur);
+
+    // 設定を保存する(画面の描き直しはしない)。保存に失敗したら、元の値に戻す
+    const save = async (m) => {
+      const prev = state.settings.lockDelay || 0;
+      if (m === prev) return; // 変わっていなければ何もしない(Enterと入力完了の二重保存を防ぐ)
+      state.settings.lockDelay = m;
+      try { await saveState(state); } catch {
+        state.settings.lockDelay = prev;
+        toast('保存できませんでした。元の設定に戻しました', 6000);
+        return;
+      }
+      updateWarn(m);
+      markActive(true);
+      resetIdle();
+      toast(m === 0 ? '離れるたびにPINを求めます' : `最後に使ってから${fmtMinutes(m)}を超えたらPINを求めます`, 3500);
+    };
+    sel.addEventListener('change', () => {
+      if (sel.value === 'custom') { customRow.hidden = false; num.focus(); num.select(); }
+      else { customRow.hidden = true; msg.textContent = ''; save(Number(sel.value)); }
+    });
+    const commitNum = () => {
+      const text = num.value.normalize('NFKC').trim();
+      const m = Number(text);
+      if (!/^\d+$/.test(text) || m < 1 || m > 10080) { msg.textContent = '1〜10080(7日)の整数で入れてください'; return; }
+      msg.textContent = '';
+      save(m);
+    };
+    num.addEventListener('change', commitNum);
+    num.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitNum(); } });
+    return h('div', { class: 'delay-box' },
+      field('PINを求めるまでの時間', sel, '最後に使ってからこの時間を超えると、PINが必要になります。この時間内は、アプリを開き直してもPINは求めません。短いほど安全です。'),
+      customRow, msg, warn);
+  }
+
   // 顔・指紋認証の欄(この端末で使えるか調べてから、中身を入れる)
   const bioBox = h('div', { class: 'bio-box' });
   async function fillBioBox(box) {
@@ -425,9 +480,12 @@ function renderSettings() {
   view.append(h('section', { class: 'card' },
     h('h2', { class: 'card-title' }, 'プライバシー'),
     h('label', { class: 'switch-row' }, h('span', {}, '金額を隠す(電車の中などで)'), hideBox),
-    h('p', { class: 'muted small' }, '2分間さわらないと、自動で金額を隠します。アプリを切り替えたときも画面を隠します。'),
+    h('p', { class: 'muted small' }, state.settings.pinHash
+      ? '金額は、下で決めた時間を超えて離れる(または放置する)と自動で隠れます。'
+      : '2分間さわらないと、自動で金額を隠します。アプリを切り替えたときも画面を隠します。'),
     h('div', { class: 'row-btns' },
       h('button', { class: 'btn', type: 'button', onclick: pinSheet }, state.settings.pinHash ? 'PINを変更・解除' : 'PIN(4〜8桁)を設定')),
+    state.settings.pinHash ? lockDelayBox() : null,
     bioBox,
     h('p', { class: 'muted small' }, 'PINや顔・指紋は「のぞき見・いたずら防止」です。強い暗号の保護ではありません。スマホ本体の画面ロックも必ず使ってください。')));
   fillBioBox(bioBox);
@@ -626,6 +684,7 @@ function pinSheet() {
         if (p1.value !== p2.value) { err.textContent = '2回の入力が違います'; return; }
         const salt = randomHex(16);
         state.settings.pinSalt = salt; state.settings.pinHash = await hashPin(salt, p1.value);
+        markActive(true);
         close(); await commit(); toast('PINを設定しました');
       } }, '設定する'))));
 }
@@ -646,6 +705,7 @@ function lock() {
   if (!state?.settings.pinHash || runtime.locked) return;
   if (!pinOk()) { toast('このURL(HTTP)ではPINロックが使えません。HTTPSで開いてください', 6000); return; }
   runtime.locked = true;
+  try { localStorage.setItem(LOCKED_KEY, '1'); } catch { /* 何もしない */ } // アプリが終了しても、ロックを覚えておく
   document.querySelectorAll('.overlay').forEach((o) => o.remove()); // 金額入りの入力画面が残らないように
   document.body.classList.remove('noscroll');
   setInert(true);
@@ -660,6 +720,8 @@ function lock() {
   // ロックを解除する(PINでも顔・指紋でも共通)
   function finish() {
     writeGuard({ n: 0, until: 0 });
+    try { localStorage.removeItem(LOCKED_KEY); } catch { /* 何もしない */ }
+    markActive(true);
     runtime.locked = false; runtime.bioPrompt = null; setInert(false); overlay.remove(); clearInterval(timer);
   }
   // 顔・指紋で開く。manual=true は、ボタンを押したとき(失敗したら理由を表示する)
@@ -753,32 +815,72 @@ function render(animate = false) {
 }
 
 // ---------- 自動で隠す・ロックする ----------
+// 「PINを求めるまでの時間」(設定 lockDelay、単位は分)の考え方:
+//   ・0(すぐ)      : アプリを離れた瞬間に隠してロックする。放置は2分で隠してロックする
+//   ・1以上(分)    : 「最後に使ってから」の時間が、その分数を超えたときだけ隠してロックする
+//   ・PINが無い    : 時間設定は使わない(離れたら隠す・2分放置で隠す)
+// 「最後に使った時刻」を端末に覚えておくので、iPhoneがアプリを一度閉じても、時間内ならPINなしで開ける。
+// ★安全のため: ・ロック中は時刻を更新しない(離れても猶予は延びない)
+//             ・ロックした事実も端末に残す(アプリが終了しても、開き直したときにロックされる)
+//             ・時計を戻された・記録が無い/壊れているときは、ロックする
+const ACTIVE_KEY = 'shisan-last-active';
+const LOCKED_KEY = 'shisan-locked';
+const lockMs = () => (state?.settings.lockDelay || 0) * 60000; // 0 なら「すぐ」
+const readActive = () => { try { return Number(localStorage.getItem(ACTIVE_KEY)) || 0; } catch { return 0; } };
+const wasLocked = () => { try { return localStorage.getItem(LOCKED_KEY) === '1'; } catch { return true; } };
+let lastActiveAt = 0; // メモリ上の「最後に使った時刻」
+let lastWrite = 0;
+function markActive(force = false) { // 「いま使っている」と記録する(端末への書き込みは5秒に1回まで)
+  const now = Date.now();
+  lastActiveAt = now;
+  if (!force && now - lastWrite < 5000) return;
+  lastWrite = now;
+  try { localStorage.setItem(ACTIVE_KEY, String(now)); } catch { /* 記録できなければ、次回は必ずロックする */ }
+}
+// 最後に使ってから、設定した時間を超えたか。記録が無い・時計が戻っているときも「超えた」(安全側)
+const awayTooLong = (since) => {
+  if (lockMs() === 0 || !since) return true;
+  const d = Date.now() - since;
+  return d < -5000 || d >= lockMs();
+};
+const usesDelay = () => !!state?.settings.pinHash && lockMs() > 0;
+
+function maskNow() { // 金額を隠す(👁を押すまで隠れたまま)
+  if (state && !state.settings.hidden && !runtime.autoMasked) { runtime.autoMasked = true; render(); }
+}
+
 const cover = document.getElementById('cover');
 document.addEventListener('visibilitychange', () => {
   if (EMBEDDED) return;
   if (document.hidden) {
-    if (runtime.picking > Date.now()) return; // ファイルを選んでいる間(最大60秒)は何もしない
-    cover.hidden = false;
-    // 画面の裏でも金額を隠しておく(戻ったら、👁を押すまで隠れたまま)
-    if (state && !state.settings.hidden && !runtime.autoMasked) { runtime.autoMasked = true; render(); }
-    lock();
+    if (runtime.picking > Date.now()) return; // ファイルを選んでいる間(最大60秒)は、離れた瞬間の処理だけ見送る
+    cover.hidden = false; // アプリ切り替え画面に金額が写らないよう、幕で隠す
+    if (!usesDelay()) { maskNow(); lock(); } // 時間設定が無いときは、離れた瞬間に隠す・ロックする
   } else {
     cover.hidden = true;
+    if (usesDelay() && !runtime.locked) {
+      // 戻ってきたとき: 最後に使ってから設定の時間を超えていればロック。超えていなければ、そのまま続ける
+      if (awayTooLong(lastActiveAt)) { maskNow(); lock(); } else markActive(true);
+    }
     if (runtime.locked) runtime.bioPrompt?.(); // ロック中に画面へ戻ったら、顔・指紋をもう一度出す
   }
 });
+
+// 放置したとき: PINと時間設定があればその時間、なければ2分で隠す(ロックはPINがあるときだけ)
 let idleTimer;
+const idleLimit = () => (usesDelay() ? lockMs() : 120000);
 function resetIdle() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    if (!state.settings.hidden && !runtime.autoMasked) { runtime.autoMasked = true; render(); }
+    maskNow();
     // 開いている入力画面(金額が見えている)も閉じる
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
     document.body.classList.remove('noscroll');
     lock();
-  }, 120000);
+  }, idleLimit());
 }
-['pointerdown', 'keydown', 'scroll'].forEach((ev) => addEventListener(ev, resetIdle, { passive: true }));
+function onActivity() { resetIdle(); if (!runtime.locked) markActive(); }
+['pointerdown', 'keydown', 'scroll'].forEach((ev) => addEventListener(ev, onActivity, { passive: true }));
 
 eyeBtn.addEventListener('click', async () => {
   if (isMasked()) { state.settings.hidden = false; runtime.autoMasked = false; }
@@ -800,6 +902,7 @@ function validateLoaded(s) {
     hidden: raw.hidden === true,
     isSample: raw.isSample === true,
     lastBackup: typeof raw.lastBackup === 'string' && !Number.isNaN(Date.parse(raw.lastBackup)) ? raw.lastBackup : null,
+    lockDelay: Number.isInteger(raw.lockDelay) && raw.lockDelay >= 0 && raw.lockDelay <= 10080 ? raw.lockDelay : 0,
     pinHash: pinValid ? raw.pinHash : null,
     pinSalt: pinValid ? raw.pinSalt : null,
     bioId: pinValid && typeof raw.bioId === 'string' && /^[A-Za-z0-9_-]{16,1024}$/.test(raw.bioId) ? raw.bioId : null,
@@ -867,7 +970,10 @@ async function boot() {
     showFatal('原因: ' + (e?.message || e));
     return; // ★ここで止まる。何も保存・上書きしない
   }
-  lock();   // PINがあれば、先にロックしてから描画する
+  lastActiveAt = readActive();
+  // ロックが残っている、または最後に使ってから設定の時間を超えているときだけロックする(先にロックしてから描画する)
+  if (wasLocked() || awayTooLong(lastActiveAt)) lock();
+  else markActive(true);
   render(true);
   if (migrateFailed) toast('データの整理を保存できませんでした。端末の空き容量を確認してください', 6000);
   resetIdle();
