@@ -33,10 +33,10 @@ export function drawDonut(canvas, state, month) {
       ctx.save();
       ctx.textAlign = 'center';
       ctx.fillStyle = css('--muted');
-      ctx.font = '12px system-ui, sans-serif';
+      ctx.font = '700 12px system-ui, sans-serif';
       ctx.fillText('総資産', cx, cy - 12);
       ctx.fillStyle = css('--text');
-      ctx.font = '700 16px system-ui, sans-serif';
+      ctx.font = '900 17px system-ui, sans-serif';
       ctx.fillText(fmt(total), cx, cy + 10);
       ctx.restore();
     },
@@ -50,11 +50,13 @@ export function drawDonut(canvas, state, month) {
         data: rows.map((r) => r.amount),
         backgroundColor: rows.map((r) => r.category.color),
         borderColor: css('--card'),
-        borderWidth: 2,
+        borderWidth: 3,
+        borderRadius: 6,
+        hoverOffset: 10, // さわると、その部分がぴょんと飛び出す
       }],
     },
     options: {
-      cutout: '66%',
+      cutout: '62%',
       responsive: true,
       maintainAspectRatio: true,
       plugins: {

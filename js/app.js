@@ -6,7 +6,7 @@ import {
 } from './calc.js';
 import { drawDonut, drawLine, destroyCharts } from './charts.js';
 import { downloadBackup, parseBackup, isEncryptedBackup, decryptText, canEncrypt } from './backup.js';
-import { emptyState, sampleState, PALETTE } from './sample.js';
+import { emptyState, PALETTE } from './defaults.js';
 
 // ---------- 他のサイトの中に埋め込まれていたら動かさない(クリックを盗む攻撃の対策) ----------
 const EMBEDDED = window.top !== window.self;
@@ -26,11 +26,17 @@ const tabbar = document.getElementById('tabbar');
 const eyeBtn = document.getElementById('eye');
 
 const TABS = [
-  { id: 'home', label: 'ホーム', icon: '◔' },
-  { id: 'trend', label: '推移', icon: '↗' },
-  { id: 'assets', label: '資産一覧', icon: '☰' },
-  { id: 'settings', label: '設定', icon: '⚙' },
+  { id: 'home', label: 'ホーム', icon: '🏠' },
+  { id: 'trend', label: '推移', icon: '📊' },
+  { id: 'assets', label: '資産一覧', icon: '👛' },
+  { id: 'settings', label: '設定', icon: '⚙️' },
 ];
+
+// 分類の名前から、かわいい絵文字を選ぶ(見た目だけ。データには保存しない)
+const EMOJI = { 預金: '🏦', 現金: '💴', 株式: '📈', 投資信託: '🌱', 暗号資産: '🪙', ポイント: '🎁', その他: '✨' };
+const bubble = (cat, small = false) =>
+  h('span', { class: 'bubble' + (small ? ' sm' : ''), css: { background: cat.color }, 'aria-hidden': 'true' }, EMOJI[cat.name] || '🐷');
+const pigImg = (cls) => h('img', { src: 'icons/pig.png', class: cls, alt: '' });
 
 // データを保存して、画面を描き直す
 async function commit() {
@@ -149,14 +155,11 @@ function renderHome() {
       `${diff.prev === addMonths(month, -1) ? '前月' : monthLabel(diff.prev)}比 ${fmtSigned(diff.amount)}`,
       diff.rate != null && !isMasked() ? `(${up ? '+' : '−'}${Math.abs(diff.rate).toFixed(1)}%)` : ''));
   }
+  totalCard.append(pigImg('pig-peek'));
   view.append(totalCard);
 
-  // お知らせ(サンプル・バックアップ)
-  if (state.settings.isSample) {
-    view.append(h('div', { class: 'notice' },
-      'いま表示しているのはサンプルデータです。',
-      h('button', { class: 'link', type: 'button', onclick: () => { ui.tab = 'settings'; render(); } }, '設定から消して、自分のデータを入れられます')));
-  } else if (backupAdvice()) {
+  // お知らせ(バックアップのすすめ)
+  if (backupAdvice()) {
     view.append(h('div', { class: 'notice warn' }, backupAdvice(),
       h('button', { class: 'link', type: 'button', onclick: () => { ui.tab = 'settings'; render(); } }, 'バックアップする')));
   }
@@ -173,7 +176,7 @@ function renderHome() {
         class: 'legend-row', type: 'button', 'aria-expanded': String(opened),
         onclick: () => { opened ? ui.open.delete(r.category.id) : ui.open.add(r.category.id); render(); },
       },
-      h('span', { class: 'dot', css: { background: r.category.color } }),
+      bubble(r.category),
       h('span', { class: 'legend-name' }, r.category.name),
       h('span', { class: 'legend-pct' }, isMasked() ? '••%' : pcts[i] === 0 ? '<0.1%' : pcts[i].toFixed(1) + '%'),
       h('span', { class: 'legend-amt' }, fmt(r.amount))),
@@ -191,8 +194,10 @@ function renderHome() {
 // データがまだ無いときの表示
 function emptyBox() {
   return h('div', { class: 'empty' },
-    h('p', {}, 'まだ資産がありません。'),
-    h('button', { class: 'btn primary', type: 'button', onclick: () => assetSheet(null) }, '最初の資産を追加する'));
+    pigImg('empty-pig'),
+    h('p', {}, 'まだ資産がありません'),
+    h('p', { class: 'muted small' }, '預金・現金・株式など、持っているものを1つずつ入れていきましょう。入れた金額は、このスマホの中だけに保存されます。'),
+    h('button', { class: 'btn primary', type: 'button', onclick: () => assetSheet(null) }, '＋ 最初の資産を入れる'));
 }
 
 // バックアップのすすめ(なければ空文字)
@@ -251,7 +256,7 @@ function renderAssets() {
         h('span', { class: 'asset-amt' }, fmt(valueOf(state, month, a.id)))))));
     view.append(h('section', { class: 'card' },
       h('div', { class: 'cat-head' },
-        h('span', { class: 'dot', css: { background: r.category.color } }),
+        bubble(r.category),
         h('h2', {}, r.category.name),
         h('span', { class: 'cat-sum' }, fmt(r.amount))),
       ul));
@@ -347,7 +352,7 @@ function updateSheet() {
     inputs = [];
     byCategory(state, month).forEach((r) => {
       if (r.assets.length === 0) return;
-      rowsBox.append(h('div', { class: 'upd-cat' }, h('span', { class: 'dot', css: { background: r.category.color } }), r.category.name));
+      rowsBox.append(h('div', { class: 'upd-cat' }, bubble(r.category, true), r.category.name));
       r.assets.forEach((a) => {
         const prev = prevM ? valueOf(state, prevM, a.id) : 0;
         const el = h('input', { type: 'text', inputmode: 'numeric', value: String(Object.hasOwn(baseRec, a.id) ? baseRec[a.id] : 0), autocomplete: 'off', 'aria-label': a.name + 'の金額' });
@@ -456,7 +461,7 @@ function renderSettings() {
   // 分類の管理
   const catList = h('ul', { class: 'asset-list' }, state.categories.map((c) =>
     h('li', {}, h('button', { class: 'asset-row', type: 'button', onclick: () => categorySheet(c) },
-      h('span', { class: 'asset-name' }, h('span', { class: 'dot', css: { background: c.color } }), c.name),
+      h('span', { class: 'asset-name' }, bubble(c, true), c.name),
       h('span', { class: 'muted small' }, state.assets.filter((a) => a.categoryId === c.id).length + '件')))));
   view.append(h('section', { class: 'card' },
     h('h2', { class: 'card-title' }, '分類の管理'), catList,
@@ -464,12 +469,6 @@ function renderSettings() {
 
   // データの扱い
   const dataCard = h('section', { class: 'card' }, h('h2', { class: 'card-title' }, 'データ'));
-  if (state.settings.isSample) {
-    dataCard.append(h('button', { class: 'btn primary', type: 'button', onclick: async () => {
-      if (!(await confirmBox('サンプルデータを消して、空の状態から始めます。よろしいですか?', '消して始める', true))) return;
-      const s = emptyState(); s.settings = { ...state.settings, isSample: false }; state = s; ui.tab = 'assets'; await commit();
-    } }, 'サンプルを消して自分のデータを入れる'));
-  }
   dataCard.append(
     h('button', { class: 'btn danger', type: 'button', onclick: async () => {
       const lastTxt = state.settings.lastBackup ? new Date(state.settings.lastBackup).toLocaleDateString('ja-JP') : 'なし';
@@ -481,9 +480,9 @@ function renderSettings() {
   view.append(dataCard);
 }
 
-// 上書きや削除の直前に、いまのデータを念のためファイルに書き出す(サンプルや空のときは不要)
+// 上書きや削除の直前に、いまのデータを念のためファイルに書き出す(空のときは不要)
 function safetyExport() {
-  if (!state.settings.isSample && state.assets.length > 0) downloadBackup(state);
+  if (state.assets.length > 0) downloadBackup(state);
 }
 
 // バックアップの読み込み
@@ -522,7 +521,7 @@ function categorySheet(cat) {
   const swatches = h('div', { class: 'swatches' });
   const drawSw = () => {
     swatches.replaceChildren(...PALETTE.map((c) => h('button', {
-      type: 'button', class: 'swatch' + (c === color ? ' on' : ''), 'aria-label': '色 ' + c, css: { background: c },
+      type: 'button', class: 'swatch' + (c === color ? ' on' : ''), 'aria-label': COLOR_NAMES[PALETTE.indexOf(c)] || '色', 'aria-pressed': String(c === color), css: { background: c },
       onclick: () => { color = c; drawSw(); },
     })));
   };
@@ -656,7 +655,7 @@ function lock() {
   const bioBtn = state.settings.bioId && bioSupported()
     ? h('button', { class: 'btn', type: 'button', onclick: () => tryBio(true) }, '顔・指紋で開く') : null;
   const overlay = h('div', { class: 'lock' }, h('div', { class: 'lock-box' },
-    h('div', { class: 'lock-icon' }, '🔒'), h('p', {}, bioBtn ? '顔・指紋、またはPINで開きます' : 'PINを入れてください'), input, err, openBtn, bioBtn));
+    pigImg('lock-pig'), h('p', {}, bioBtn ? '顔・指紋、またはPINで開きます' : 'PINを入れてください'), input, err, openBtn, bioBtn));
 
   // ロックを解除する(PINでも顔・指紋でも共通)
   function finish() {
@@ -716,17 +715,41 @@ function lock() {
   else input.focus();
 }
 
+// ---------- スクロールでふわっと浮き上がる動き(Fade-in Up) ----------
+// 画面に入った部品に、順番に .in を付ける(CSS側で下から浮き上がる動きになる)。
+// ・タブを切り替えたときだけ動かす(金額を直したあとの描き直しでは、動かさない)
+// ・端末が「動きを減らす」設定のときや、機能が無い古いブラウザでは、動かさず最初から表示する
+let revealObserver = null;
+function setupReveal(animate) {
+  revealObserver?.disconnect();
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (!animate || reduce || !('IntersectionObserver' in window)) return;
+  revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (e.isIntersecting) { e.target.classList.add('in'); revealObserver.unobserve(e.target); }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -6% 0px' });
+  [...view.children].filter((el) => !el.classList.contains('fab')).forEach((el, i) => {
+    el.classList.add('reveal');
+    el.style.setProperty('--d', Math.min(i, 4) * 80 + 'ms'); // 上から順に、少しずつ遅らせる
+    revealObserver.observe(el);
+  });
+  // 念のための保険: 何かの理由で検知されなかった要素が、透明のまま残らないようにする
+  setTimeout(() => view.querySelectorAll('.reveal:not(.in)').forEach((el) => el.classList.add('in')), 3000);
+}
+
 // ---------- 画面全体の描き直し ----------
-function render() {
+function render(animate = false) {
   destroyCharts();
   applyMask();
   view.replaceChildren();
   titleEl.textContent = TABS.find((t) => t.id === ui.tab).label;
   tabbar.replaceChildren(...TABS.map((t) => h('button', {
     type: 'button', class: 'tab' + (ui.tab === t.id ? ' on' : ''), 'aria-current': ui.tab === t.id ? 'page' : null,
-    onclick: () => { ui.tab = t.id; render(); window.scrollTo(0, 0); },
+    onclick: () => { ui.tab = t.id; render(true); window.scrollTo(0, 0); },
   }, h('span', { class: 'tab-icon', 'aria-hidden': 'true' }, t.icon), h('span', {}, t.label))));
   ({ home: renderHome, trend: renderTrend, assets: renderAssets, settings: renderSettings })[ui.tab]();
+  setupReveal(animate);
 }
 
 // ---------- 自動で隠す・ロックする ----------
@@ -784,6 +807,39 @@ function validateLoaded(s) {
   return { version: 1, categories: checked.categories, assets: checked.assets, records: checked.records, settings };
 }
 
+const COLOR_NAMES = ['青', '黄色', 'ピンク', 'ミント', '紫', 'オレンジ', 'グレー', '緑']; // PALETTE と同じ順番
+
+// 昔のデフォルト色のままの分類だけ、新しいポップな色に切り替える(自分で色を変えた分類は触らない)
+// ※ OLD_COLORS[0..6] は、分類 c1〜c7 の昔の色。新しい色は PALETTE[0..6](js/defaults.js)が同じ順番で対応する
+const OLD_COLORS = ['#0f766e', '#2563eb', '#d97706', '#7c3aed', '#db2777', '#65a30d', '#64748b'];
+function migrateColors(s) {
+  let changed = false;
+  for (const c of s.categories) {
+    const m = /^c([1-7])$/.exec(c.id);
+    if (m && c.color === OLD_COLORS[Number(m[1]) - 1]) { c.color = PALETTE[Number(m[1]) - 1]; changed = true; }
+  }
+  return changed;
+}
+
+// 昔入れていたテスト用サンプルだけを消す(あなたが入れた資産は残す)。
+// サンプルの資産は ID が a1〜a10 で、いまの入力で作る ID(長い英数字)とは区別できる
+const OLD_SAMPLE_NAMES = {
+  a1: 'サンプル銀行 普通預金', a2: 'サンプル銀行 定期預金', a3: '財布・手元の現金', a4: '国内株(サンプル)', a5: '米国株(サンプル)',
+  a6: '全世界株式ファンド', a7: '積立NISA(サンプル)', a8: 'ビットコイン(サンプル)', a9: 'ポイント(サンプル)', a10: '保険の解約返戻金(サンプル)',
+};
+function removeSampleData(s) {
+  // IDも名前も旧サンプルのままの資産だけを消す。名前を書き換えて使っている資産は、実データとして残す
+  const isSample = (a) => Object.hasOwn(OLD_SAMPLE_NAMES, a.id) && OLD_SAMPLE_NAMES[a.id] === a.name;
+  const gone = new Set(s.assets.filter(isSample).map((a) => a.id));
+  s.assets = s.assets.filter((a) => !gone.has(a.id));
+  for (const m of Object.keys(s.records)) {
+    const hadValues = Object.keys(s.records[m]).length > 0;
+    for (const id of gone) delete s.records[m][id];
+    if (hadValues && Object.keys(s.records[m]).length === 0) delete s.records[m]; // 消した結果、空になった月だけ消す
+  }
+  s.settings.isSample = false;
+}
+
 // 起動に失敗したときの画面(データには触らない)
 function showFatal(message) {
   view.replaceChildren(h('div', { class: 'card' },
@@ -795,17 +851,25 @@ function showFatal(message) {
 
 async function boot() {
   if (EMBEDDED) return;
+  let migrateFailed = false;
   try {
     await initStorage();
     const saved = await loadState();
-    if (saved === null) { state = sampleState(); await saveState(state); } // 本当に初回のときだけサンプルを入れる
-    else state = validateLoaded(saved);
+    if (saved === null) { state = emptyState(); await saveState(state); } // 初回は空の状態から始める
+    else {
+      state = validateLoaded(saved);
+      let changed = false;
+      if (state.settings.isSample) { removeSampleData(state); changed = true; } // 昔のテスト用データを自動で消す
+      if (migrateColors(state)) changed = true;
+      if (changed) { try { await saveState(state); } catch { migrateFailed = true; } } // 失敗しても、メモリ上のデータで使い続ける
+    }
   } catch (e) {
     showFatal('原因: ' + (e?.message || e));
     return; // ★ここで止まる。何も保存・上書きしない
   }
   lock();   // PINがあれば、先にロックしてから描画する
-  render();
+  render(true);
+  if (migrateFailed) toast('データの整理を保存できませんでした。端末の空き容量を確認してください', 6000);
   resetIdle();
   requestPersist();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

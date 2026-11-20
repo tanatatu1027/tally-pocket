@@ -6,7 +6,7 @@
   <!-- 安全のための設定(CSP): 読み込み・通信を「自分のサイトのファイルだけ」に制限する -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
-  <meta name="theme-color" content="#0f766e">
+  <meta name="theme-color" content="#fff6e5">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="資産管理">
@@ -19,14 +19,14 @@
 </head>
 <body>
   <header class="app-header">
-    <h1 id="title">ホーム</h1>
+    <h1><img class="logo" src="icons/pig.png" alt=""><span id="title">ホーム</span></h1>
     <button id="eye" class="icon-btn" type="button" aria-label="金額を隠す">👁</button>
   </header>
-  <noscript><p style="padding:16px">このアプリを使うには JavaScript を有効にしてください。</p></noscript>
+  <noscript><p class="noscript-msg">このアプリを使うには JavaScript を有効にしてください。</p></noscript>
   <main id="view"></main>
   <nav id="tabbar" class="tabbar" aria-label="メニュー"></nav>
   <!-- アプリを切り替えたときに金額が見えないようにする幕 -->
-  <div id="cover" class="cover" hidden>資産管理</div>
+  <div id="cover" class="cover" hidden><img src="icons/pig.png" alt=""></div>
 
   <!-- Chart.js(自分のフォルダに置いたもの。外部から読み込まない) -->
   <script src="lib/chart.min.js"></script>
