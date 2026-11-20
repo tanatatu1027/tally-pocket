@@ -17,7 +17,7 @@ if (EMBEDDED) {
 
 // ---------- 状態(アプリが覚えていること) ----------
 let state;                                   // 保存されるデータ本体
-const ui = { tab: 'home', period: 12, stacked: false, open: new Set() }; // 画面の状態(保存しない)
+const ui = { tab: 'home', period: 12, stacked: false, open: new Set(), excluded: new Set() }; // excluded: 見ないことにした資産のid(基本は空=全部見る) // 画面の状態(保存しない)
 const runtime = { autoMasked: false, locked: false, picking: 0, bioPrompt: null }; // picking: ファイル選択中の印(この時刻まで有効)                    // 一時的な状態
 
 const view = document.getElementById('view');
@@ -135,6 +135,54 @@ function maskInputs(inputs) {
 const field = (label, input, help) =>
   h('label', { class: 'field' }, h('span', { class: 'field-label' }, label), input, help ? h('span', { class: 'help' }, help) : null);
 
+// ---------- 表示する資産の絞り込み(基本は全部選択。外したものだけ集計から除く) ----------
+// 集計・グラフ用に「外した資産を除いたデータ」を返す(保存データは変えない)
+const shown = () => ({ ...state, assets: state.assets.filter((a) => !ui.excluded.has(a.id)) });
+const isFiltered = () => state.assets.some((a) => ui.excluded.has(a.id));
+
+// 画面上部の「いま何を見ているか」ボタン
+function filterBar() {
+  if (state.assets.length === 0) return null;
+  const on = state.assets.filter((a) => !ui.excluded.has(a.id)).length;
+  const filtered = isFiltered();
+  return h('div', { class: 'filter-bar' },
+    h('button', { class: 'chip' + (filtered ? ' on' : ''), type: 'button', onclick: filterSheet },
+      '🔍 ' + (filtered ? `選んだ資産だけ(${on}/${state.assets.length})` : '全ての資産を表示中') + ' ▾'),
+    filtered ? h('button', { class: 'link', type: 'button', onclick: () => { ui.excluded.clear(); render(); } }, '全て選び直す') : null);
+}
+
+// 絞り込みの選択画面。チェックを触るたびに、後ろの画面がすぐ変わる
+function filterSheet() {
+  const box = h('div', { class: 'filter-sheet' });
+  const draw = () => {
+    box.replaceChildren(
+      h('div', { class: 'row-btns' },
+        h('button', { class: 'btn grow', type: 'button', onclick: () => { ui.excluded.clear(); render(); draw(); } }, '全て選ぶ'),
+        h('button', { class: 'btn grow', type: 'button', onclick: () => { state.assets.forEach((a) => ui.excluded.add(a.id)); render(); draw(); } }, '全て外す')),
+      ...state.categories.map((c) => {
+        const list = state.assets.filter((a) => a.categoryId === c.id);
+        if (list.length === 0) return null;
+        const allOn = list.every((a) => !ui.excluded.has(a.id));
+        const someOn = list.some((a) => !ui.excluded.has(a.id));
+        const catBox = h('input', { type: 'checkbox', checked: allOn, 'aria-label': `${c.name}をまとめて切り替え` });
+        catBox.indeterminate = someOn && !allOn;
+        catBox.addEventListener('change', () => {
+          list.forEach((a) => (catBox.checked ? ui.excluded.delete(a.id) : ui.excluded.add(a.id)));
+          render(); draw();
+        });
+        return h('section', { class: 'filter-cat' },
+          h('label', { class: 'filter-row head' }, catBox, bubble(c, true), h('span', {}, c.name)),
+          ...list.map((a) => {
+            const cb = h('input', { type: 'checkbox', checked: !ui.excluded.has(a.id) });
+            cb.addEventListener('change', () => { cb.checked ? ui.excluded.delete(a.id) : ui.excluded.add(a.id); render(); draw(); });
+            return h('label', { class: 'filter-row' }, cb, h('span', {}, a.name));
+          }));
+      }).filter(Boolean));
+  };
+  draw();
+  openSheet('見る資産を選ぶ', box);
+}
+
 // ---------- 画面: ホーム ----------
 function renderHome() {
   const month = latestMonth(state);
@@ -142,12 +190,15 @@ function renderHome() {
     view.append(emptyBox());
     return;
   }
-  const total = totalOf(state, month);
-  const diff = diffFromPrev(state, month);
+  const fs = shown();
+  const total = totalOf(fs, month);
+  const diff = diffFromPrev(fs, month);
+
+  view.append(filterBar());
 
   // 総資産(一番上に大きく)
   const totalCard = h('section', { class: 'card total-card' },
-    h('div', { class: 'muted small' }, `総資産(${monthLabel(month)})`),
+    h('div', { class: 'muted small' }, `${isFiltered() ? '選んだ資産の合計' : '総資産'}(${monthLabel(month)})`),
     h('div', { class: 'total-amount' }, fmt(total)));
   if (diff) {
     const up = diff.amount >= 0;
@@ -165,7 +216,7 @@ function renderHome() {
   }
 
   // ドーナツ円グラフ + 凡例
-  const rows = byCategory(state, month).filter((r) => r.amount > 0);
+  const rows = byCategory(fs, month).filter((r) => r.amount > 0);
   const pcts = percents(rows.map((r) => r.amount));
   const canvas = h('canvas', { 'aria-label': '資産の内訳ドーナツグラフ', role: 'img' });
   const legend = h('ul', { class: 'legend' });
@@ -181,14 +232,14 @@ function renderHome() {
       h('span', { class: 'legend-pct' }, isMasked() ? '••%' : pcts[i] === 0 ? '<0.1%' : pcts[i].toFixed(1) + '%'),
       h('span', { class: 'legend-amt' }, fmt(r.amount))),
       opened ? h('ul', { class: 'sub-list' },
-        r.assets.filter((a) => valueOf(state, month, a.id) > 0).map((a) =>
-          h('li', {}, h('span', {}, a.name), h('span', {}, fmt(valueOf(state, month, a.id))))))
+        r.assets.filter((a) => valueOf(fs, month, a.id) > 0).map((a) =>
+          h('li', {}, h('span', {}, a.name), h('span', {}, fmt(valueOf(fs, month, a.id))))))
         : null));
   });
   view.append(h('section', { class: 'card' },
     h('h2', { class: 'card-title' }, '資産の内訳'),
     h('div', { class: 'donut-wrap' }, canvas), legend));
-  drawDonut(canvas, state, month);
+  drawDonut(canvas, fs, month);
 }
 
 // データがまだ無いときの表示
@@ -220,20 +271,22 @@ function renderTrend() {
     h('button', { type: 'button', class: !ui.stacked ? 'on' : '', 'aria-pressed': String(!ui.stacked), onclick: () => { ui.stacked = false; render(); } }, '合計'),
     h('button', { type: 'button', class: ui.stacked ? 'on' : '', 'aria-pressed': String(ui.stacked), onclick: () => { ui.stacked = true; render(); } }, '内訳'));
 
+  const fs = shown();
+  view.append(filterBar());
   const canvas = h('canvas', { 'aria-label': '資産推移の折れ線グラフ', role: 'img' });
   view.append(h('section', { class: 'card' },
     h('div', { class: 'toolbar' }, bar, mode),
     h('div', { class: 'line-wrap' }, canvas),
     h('p', { class: 'muted small' }, 'グラフを触ると、その月の金額が出ます。')));
-  drawLine(canvas, state, ui.period, ui.stacked);
+  drawLine(canvas, fs, ui.period, ui.stacked);
 
   // 月ごとの一覧(新しい順)
   const list = h('ul', { class: 'month-list' });
   [...months].reverse().slice(0, 24).forEach((m) => {
-    const d = diffFromPrev(state, m);
+    const d = diffFromPrev(fs, m);
     list.append(h('li', {},
       h('span', {}, monthLabel(m)),
-      h('span', { class: 'month-amt' }, fmt(totalOf(state, m))),
+      h('span', { class: 'month-amt' }, fmt(totalOf(fs, m))),
       h('span', { class: 'month-diff ' + (d ? (d.amount >= 0 ? 'up' : 'down') : '') }, d ? fmtSigned(d.amount) : '—')));
   });
   view.append(h('section', { class: 'card' }, h('h2', { class: 'card-title' }, '月ごとの総資産'), list));
@@ -248,17 +301,19 @@ function renderAssets() {
   if (state.assets.length === 0) view.append(emptyBox());
   else if (month) view.append(h('p', { class: 'muted small month-note' }, `${monthLabel(month)}の金額を表示しています`));
 
+  view.append(filterBar());
   byCategory(state, month || nowMonth()).forEach((r) => {
     if (r.assets.length === 0) return;
+    const sum = r.assets.filter((a) => !ui.excluded.has(a.id)).reduce((t, a) => t + valueOf(state, month, a.id), 0);
     const ul = h('ul', { class: 'asset-list' }, r.assets.map((a) =>
-      h('li', {}, h('button', { class: 'asset-row', type: 'button', onclick: () => assetSheet(a) },
+      h('li', { class: ui.excluded.has(a.id) ? 'off' : '' }, h('button', { class: 'asset-row', type: 'button', onclick: () => assetSheet(a) },
         h('span', { class: 'asset-name' }, a.name),
         h('span', { class: 'asset-amt' }, fmt(valueOf(state, month, a.id)))))));
     view.append(h('section', { class: 'card' },
       h('div', { class: 'cat-head' },
         bubble(r.category),
         h('h2', {}, r.category.name),
-        h('span', { class: 'cat-sum' }, fmt(r.amount))),
+        h('span', { class: 'cat-sum' }, fmt(sum))),
       ul));
   });
 
