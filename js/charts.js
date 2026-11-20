@@ -24,6 +24,7 @@ export function drawDonut(canvas, state, month) {
   const pcts = percents(rows.map((r) => r.amount));
 
   // 真ん中に文字を描く小さな部品(プラグイン)
+  // 触った部分があれば、真ん中をその分類の名前・金額・割合に切り替える(吹き出しは使わない=真ん中と重ならない)
   const centerText = {
     id: 'centerText',
     afterDraw(chart) {
@@ -32,12 +33,41 @@ export function drawDonut(canvas, state, month) {
       const cy = (a.top + a.bottom) / 2;
       ctx.save();
       ctx.textAlign = 'center';
-      ctx.fillStyle = css('--muted');
-      ctx.font = '700 12px system-ui, sans-serif';
-      ctx.fillText('総資産', cx, cy - 12);
-      ctx.fillStyle = css('--text');
-      ctx.font = '900 17px system-ui, sans-serif';
-      ctx.fillText(fmt(total), cx, cy + 10);
+      ctx.textBaseline = 'middle';
+      // 大きめの部分には、円の上に割合(%)を書く(小さい部分は下の凡例で確認。金額を隠している間は書かない)
+      if (!isMasked()) {
+        chart.getDatasetMeta(0).data.forEach((arc, i) => {
+          if (pcts[i] < 6) return;
+          const p = arc.getCenterPoint();
+          const t = pcts[i].toFixed(1) + '%';
+          ctx.font = '800 12px system-ui, sans-serif';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#fff';
+          ctx.fillStyle = css('--ink');
+          ctx.strokeText(t, p.x, p.y);
+          ctx.fillText(t, p.x, p.y);
+        });
+      }
+      const act = chart.getActiveElements()[0];
+      if (act) {
+        const r = rows[act.index];
+        ctx.fillStyle = r.category.color;
+        ctx.font = '900 13px system-ui, sans-serif';
+        ctx.fillText(r.category.name, cx, cy - 18);
+        ctx.fillStyle = css('--text');
+        ctx.font = '900 17px system-ui, sans-serif';
+        ctx.fillText(fmt(r.amount), cx, cy + 2);
+        ctx.fillStyle = css('--muted');
+        ctx.font = '700 12px system-ui, sans-serif';
+        ctx.fillText(isMasked() ? '••%' : pcts[act.index].toFixed(1) + '%', cx, cy + 22);
+      } else {
+        ctx.fillStyle = css('--muted');
+        ctx.font = '700 12px system-ui, sans-serif';
+        ctx.fillText('総資産', cx, cy - 12);
+        ctx.fillStyle = css('--text');
+        ctx.font = '900 17px system-ui, sans-serif';
+        ctx.fillText(fmt(total), cx, cy + 10);
+      }
       ctx.restore();
     },
   };
@@ -61,12 +91,7 @@ export function drawDonut(canvas, state, month) {
       maintainAspectRatio: true,
       plugins: {
         legend: { display: false },
-        tooltip: {
-          enabled: !isMasked(), // 隠している間は、触っても情報を出さない
-          callbacks: {
-            label: (c) => ` ${c.label}: ${fmt(c.parsed)}(${pcts[c.dataIndex].toFixed(1)}%)`,
-          },
-        },
+        tooltip: { enabled: false }, // 吹き出しは出さず、真ん中に表示する
       },
     },
     plugins: [centerText],
