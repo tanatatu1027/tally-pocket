@@ -1,0 +1,11 @@
+# 実データ・バックアップ・スクリーンショット・メモは公開しない
+*.json
+!manifest.json
+*.csv
+*.jpg
+*.jpeg
+*.heic
+*.env
+node_modules/
+CLAUDE.md
+起動.bat

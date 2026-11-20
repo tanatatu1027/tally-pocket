@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- 安全のための設定(CSP): 読み込み・通信を「自分のサイトのファイルだけ」に制限する -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="資産管理">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>資産管理</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1 id="title">ホーム</h1>
+    <button id="eye" class="icon-btn" type="button" aria-label="金額を隠す">👁</button>
+  </header>
+  <noscript><p style="padding:16px">このアプリを使うには JavaScript を有効にしてください。</p></noscript>
+  <main id="view"></main>
+  <nav id="tabbar" class="tabbar" aria-label="メニュー"></nav>
+  <!-- アプリを切り替えたときに金額が見えないようにする幕 -->
+  <div id="cover" class="cover" hidden>資産管理</div>
+
+  <!-- Chart.js(自分のフォルダに置いたもの。外部から読み込まない) -->
+  <script src="lib/chart.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
