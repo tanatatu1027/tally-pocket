@@ -256,18 +256,6 @@ function syncCard() {
   return card;
 }
 
-// 金額を隠しているときは、入力欄も伏せ字(•••)にする。「見る」ボタンで一時的に表示できる
-function maskInputs(inputs) {
-  if (!isMasked()) return null;
-  inputs.forEach((el) => { el.type = 'password'; });
-  let shown = false;
-  return h('button', { class: 'link', type: 'button', onclick: (ev) => {
-    shown = !shown;
-    inputs.forEach((el) => { el.type = shown ? 'text' : 'password'; });
-    ev.currentTarget.textContent = shown ? '金額を隠す' : '👁 金額を見る';
-  } }, '👁 金額を見る');
-}
-
 // ラベル付きの入力欄
 const field = (label, input, help) =>
   h('label', { class: 'field' }, h('span', { class: 'field-label' }, label), input, help ? h('span', { class: 'help' }, help) : null);
@@ -534,7 +522,7 @@ function assetSheet(asset) {
     field('名前', name),
     field('分類', cat),
     field(`金額(${monthLabel(target)})`, amount, '「円」や「,」は付けても付けなくてもOK'),
-    maskInputs([amount]), warn, err,
+    warn, err,
     h('div', { class: 'row-btns' },
       asset ? h('button', { class: 'btn danger', type: 'button', onclick: remove }, '削除') : null,
       h('button', { class: 'btn primary grow', type: 'button', onclick: save }, '保存')));
@@ -549,7 +537,6 @@ function updateSheet(initialMonth) {
   const monthInput = h('input', { type: 'month', value: typeof initialMonth === 'string' ? initialMonth : nowMonth(), max: nowMonth(), min: '2000-01', 'aria-label': '対象の月' });
   const rowsBox = h('div', { class: 'update-rows' });
   const err = h('p', { class: 'error', role: 'alert' });
-  const maskBox = h('div', {});
   let inputs = []; // [{asset, el}]
 
   // 選んだ月に合わせて、入力欄を作り直す
@@ -578,8 +565,6 @@ function updateSheet(initialMonth) {
         inputs.push({ asset: a, el });
       });
     });
-    // 金額を隠しているときは入力欄も伏せ字にする
-    maskBox.replaceChildren(maskInputs(inputs.map((x) => x.el)) || '');
   };
   monthInput.addEventListener('change', build);
   build();
@@ -603,7 +588,7 @@ function updateSheet(initialMonth) {
 
   const body = h('div', { class: 'form' },
     field('対象の月', monthInput, '前月の金額が入っています。変わったものだけ直してください'),
-    maskBox, rowsBox, err,
+    rowsBox, err,
     h('button', { class: 'btn primary', type: 'button', onclick: save }, 'この内容で保存'));
   const close = openSheet('今月の更新', body);
 }
