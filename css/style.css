@@ -181,6 +181,8 @@ main > .toolbar { margin-bottom: 0; }
 .btn:disabled { opacity: .5; transform: none; box-shadow: 0 4px 0 var(--ink); cursor: not-allowed; }
 .btn:active:not(:disabled) { transform: translateY(4px) scale(.98); box-shadow: 0 0 0 var(--ink); }
 .row-btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.col-btns { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.col-btns .btn { width: 100%; }
 
 /* マウスやトラックパッドのとき(指でさわる画面では、ホバーは出さない) */
 @media (hover: hover) {

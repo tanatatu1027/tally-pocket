@@ -7,6 +7,7 @@ import {
 import { drawDonut, drawLine, destroyCharts } from './charts.js';
 import { downloadBackup, parseBackup, isEncryptedBackup, decryptText, canEncrypt } from './backup.js';
 import { emptyState, PALETTE } from './defaults.js';
+import { syncConfigured, syncSupported, payloadOf, status as syncStatus, connect as syncConnect, markAdopted, syncNow, forcePush, disconnect as syncDisconnect } from './sync.js';
 
 // ---------- 他のサイトの中に埋め込まれていたら動かさない(クリックを盗む攻撃の対策) ----------
 const EMBEDDED = window.top !== window.self;
@@ -46,6 +47,7 @@ async function commit() {
     toast('⚠ 保存できませんでした。端末の空き容量を確認して、バックアップを書き出してください', 9000);
   }
   render();
+  scheduleSync();
 }
 
 // 金額を隠すかどうかを反映する
@@ -117,6 +119,141 @@ function askSecret(message, { confirmAgain = false, minLength = 1, okLabel = 'OK
     document.body.append(overlay);
     a.focus();
   });
+}
+
+// 選択肢が2つ以上あるダイアログ。選んだ値を返す
+function choiceBox(message, choices) {
+  return new Promise((resolve) => {
+    const overlay = h('div', { class: 'overlay center' });
+    const done = (v) => { overlay.remove(); resolve(v); };
+    overlay.append(h('div', { class: 'dialog', role: 'alertdialog' },
+      h('p', {}, message),
+      h('div', { class: 'col-btns' }, choices.map((c) =>
+        h('button', { class: 'btn ' + (c.kind || ''), type: 'button', onclick: () => done(c.value) }, c.label)))));
+    document.body.append(overlay);
+  });
+}
+
+// ---------- 端末どうしの共有(くわしい仕組みは sync.js) ----------
+let syncBusy = false;
+let syncTimer = null;
+let syncInfoEl = null; // 設定画面の「最後の同期」表示欄
+const syncReady = () => syncConfigured() && syncSupported() && !!state;
+function scheduleSync() { // 変更の2.5秒後にまとめて送る
+  if (!syncReady()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => { syncTimer = null; runSync(); }, 2500);
+}
+const syncBlocked = () => runtime.locked || !!document.querySelector('.overlay'); // ロック中・入力中は、画面の中身を入れ替えない
+
+// クラウドの内容をこの端末に反映する(設定=PINなどは触らない)
+async function applyRemote(r) {
+  state.categories = r.data.categories; state.assets = r.data.assets; state.records = r.data.records;
+  state.settings.isSample = false;
+  ui.excluded = new Set([...ui.excluded].filter((id) => state.assets.some((a) => a.id === id)));
+  try { await saveState(state); } catch { toast('⚠ 取り込んだデータを保存できませんでした。空き容量を確認してください', 8000); return false; }
+  await markAdopted(r.rev, payloadOf(state));
+  render();
+  return true;
+}
+
+function setSyncInfo(text) { if (syncInfoEl?.isConnected) syncInfoEl.textContent = text; }
+const whenText = (t) => (t ? new Date(t).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'まだ');
+
+async function runSync(manual = false) {
+  if (!syncReady() || syncBusy) return;
+  syncBusy = true;
+  try {
+    const r = await syncNow(payloadOf(state));
+    if (r.status === 'off') return;
+    if (r.status === 'pull' || r.status === 'conflict') {
+      if (syncBlocked()) { if (manual) toast('入力中のため、あとで同期します'); return; }
+      if (r.status === 'pull') { if (await applyRemote(r)) toast('他の端末の変更を取り込みました', 3500); }
+      else await resolveConflict(r);
+    } else if (r.status === 'offline') {
+      setSyncInfo('オフラインです。つながったら自動で同期します'); if (manual) toast('ネットにつながっていません');
+      return;
+    } else if (r.status === 'error') {
+      setSyncInfo('同期できませんでした: ' + r.message); if (manual) toast('同期できませんでした: ' + r.message, 6000);
+      return;
+    } else if (manual) toast('同期しました');
+    setSyncInfo('最後の同期: ' + whenText(Date.now()));
+  } finally { syncBusy = false; }
+}
+
+// この端末とクラウドの両方に未共有の変更があるとき、どちらを残すか選んでもらう
+async function resolveConflict(r) {
+  const pick = await choiceBox(
+    'この端末と、ほかの端末(クラウド)の両方に、まだ共有されていない変更があります。どちらの内容を残しますか?(選ばなかったほうの変更は消えます)',
+    [{ value: 'cloud', label: 'クラウドの内容にする', kind: 'primary' }, { value: 'local', label: 'この端末の内容にする' }, { value: 'later', label: 'あとで決める' }]);
+  if (pick === 'cloud') { safetyExport(); if (await applyRemote(r)) toast('クラウドの内容に置き換えました'); }
+  else if (pick === 'local') {
+    const res = await forcePush(payloadOf(state));
+    toast(res.status === 'pushed' ? 'この端末の内容をクラウドに送りました' : '送れませんでした: ' + (res.message || ''), 5000);
+  }
+}
+
+// 共有を始める(合言葉を入れる)
+async function startSync() {
+  if (!syncSupported()) { toast('共有は安全な接続(HTTPS)でのみ使えます', 6000); return; }
+  const pass = await askSecret('合言葉を決めてください(8文字以上)。この合言葉でデータを暗号化します。2台目以降の端末でも、同じ合言葉を入れます。忘れると復元できません。家族とは別の合言葉にしてください。', { minLength: 8, okLabel: '次へ' });
+  if (pass === null) return;
+  toast('準備しています…(数秒かかります)', 4000);
+  let res;
+  try { res = await syncConnect(pass); } catch (e) { toast('接続できませんでした: ' + e.message, 7000); return; }
+  if (res.exists) {
+    const n = res.data.assets.length, m = Object.keys(res.data.records).length;
+    const take = await confirmBox(`この合言葉の共有データが見つかりました(資産${n}件、${m}か月分)。この端末のデータを、その内容に置き換えます。`, '取り込む');
+    if (take) {
+      safetyExport();
+      if (await applyRemote(res)) toast('取り込みました。この端末も共有中です', 5000);
+    } else if (state.assets.length > 0 && await confirmBox('代わりに、この端末のデータでクラウドの内容を上書きしますか?(クラウド側の元のデータは消えます)', '上書きする', true)) {
+      const r2 = await forcePush(payloadOf(state));
+      toast(r2.status === 'pushed' ? '共有を始めました' : '送れませんでした: ' + (r2.message || ''), 5000);
+    } else { await syncDisconnect(false); toast('共有は始めませんでした'); }
+  } else {
+    // 新しく作る。打ち間違いで別の金庫ができないよう、もう一度入力して確かめる
+    const again = await askSecret('確認のため、同じ合言葉をもう一度入れてください。(2台目以降の端末のつもりなら、最初の合言葉が違っています。やめてやり直してください)', { okLabel: '共有を始める' });
+    if (again !== pass) { await syncDisconnect(false); toast(again === null ? '共有は始めませんでした' : '合言葉が一致しませんでした。やり直してください', 5000); render(); return; }
+    await runSync(true);
+  }
+  render();
+}
+
+// 共有カード(設定画面)
+function syncCard() {
+  const card = h('section', { class: 'card' }, h('h2', { class: 'card-title' }, '端末どうしで共有'));
+  if (!syncConfigured()) { card.append(h('p', { class: 'muted small' }, '準備中です(共有先がまだ設定されていません)。')); return card; }
+  if (!syncSupported()) { card.append(h('p', { class: 'muted small' }, '共有は安全な接続(HTTPS)でのみ使えます。')); return card; }
+  const body = h('div');
+  card.append(body);
+  syncStatus().then((st) => {
+    if (!st.on) {
+      body.append(
+        h('p', { class: 'small' }, 'スマホとiPadなど、自分の複数の端末で同じデータを使えます。'),
+        h('p', { class: 'muted small' }, '合言葉でデータを暗号化してからクラウドに預けるので、サーバーにも、同じ仕組みを使う家族にも、中身は読めません。家族それぞれが別の合言葉を決めれば、データは混ざりません。共有するのは金額・資産・分類だけで、PINなどの設定は端末ごとのままです。'),
+        h('button', { class: 'btn primary', type: 'button', onclick: startSync }, '共有を始める'));
+      return;
+    }
+    syncInfoEl = h('p', { class: 'small' }, '最後の同期: ' + whenText(st.lastSyncAt));
+    body.append(
+      h('p', { class: 'small' }, '✅ 共有中です。変更すると自動で他の端末にも届きます。'),
+      syncInfoEl,
+      h('p', { class: 'muted small' }, '新しい端末では、同じ合言葉を入れると取り込めます。合言葉は端末に保存されないので、メモしておいてください。'),
+      h('div', { class: 'row-btns' },
+        h('button', { class: 'btn primary', type: 'button', onclick: () => runSync(true) }, '今すぐ同期'),
+        h('button', { class: 'btn', type: 'button', onclick: async () => {
+          const pick = await choiceBox('共有をやめます。この端末のデータはそのまま残ります。', [
+            { value: 'keep', label: '共有だけやめる(クラウドのデータは残す)', kind: 'primary' },
+            { value: 'del', label: 'クラウドのデータも消す', kind: 'danger' },
+            { value: 'no', label: 'やめない' }]);
+          if (pick === 'no') return;
+          try { await syncDisconnect(pick === 'del'); toast(pick === 'del' ? '共有をやめて、クラウドのデータを消しました' : '共有をやめました', 5000); }
+          catch (e) { toast('できませんでした: ' + e.message, 6000); return; }
+          render();
+        } }, '共有をやめる')));
+  }).catch(() => body.append(h('p', { class: 'muted small' }, '共有の状態を読み込めませんでした。')));
+  return card;
 }
 
 // 金額を隠しているときは、入力欄も伏せ字(•••)にする。「見る」ボタンで一時的に表示できる
@@ -563,6 +700,8 @@ function renderSettings() {
     h('p', { class: 'muted small' }, 'PINや顔・指紋は「のぞき見・いたずら防止」です。強い暗号の保護ではありません。スマホ本体の画面ロックも必ず使ってください。')));
   fillBioBox(bioBox);
 
+  view.append(syncCard());
+
   // バックアップ
   const last = state.settings.lastBackup;
   const fileInput = h('input', { type: 'file', accept: 'application/json,.json', class: 'hidden-input' });
@@ -796,6 +935,7 @@ function lock() {
     try { localStorage.removeItem(LOCKED_KEY); } catch { /* 何もしない */ }
     markActive(true);
     runtime.locked = false; runtime.bioPrompt = null; setInert(false); overlay.remove(); clearInterval(timer);
+    setTimeout(() => runSync(), 500); // ロック中に保留した共有を進める
   }
   // 顔・指紋で開く。manual=true は、ボタンを押したとき(失敗したら理由を表示する)
   // 確認中にボタンを押したときは、前の確認を中断して、新しくやり直す
@@ -1051,6 +1191,13 @@ async function boot() {
   if (migrateFailed) toast('データの整理を保存できませんでした。端末の空き容量を確認してください', 6000);
   resetIdle();
   requestPersist();
+  runSync();
+  document.addEventListener('visibilitychange', () => {
+    if (!syncReady()) return;
+    if (!document.hidden) runSync();
+    else if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; runSync(); } // 離れる前に送りきる
+  });
+  addEventListener('online', () => runSync());
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('service-worker.js').catch(() => { /* 失敗しても通常どおり動く */ });
   }

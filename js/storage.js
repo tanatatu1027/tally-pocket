@@ -72,3 +72,36 @@ export async function requestPersist() {
   } catch { /* 何もしない */ }
   return false;
 }
+
+// ---------- 共有機能の接続情報(暗号鍵など)。バックアップには入らない・localStorageには置かない ----------
+const SYNC_KEY_NAME = 'sync-config';
+export async function loadSyncConfig() {
+  if (useLocalStorage) return null;
+  const db = await getDb();
+  return new Promise((resolve, reject) => {
+    const r = db.transaction(STORE).objectStore(STORE).get(SYNC_KEY_NAME);
+    r.onsuccess = () => resolve(r.result ?? null);
+    r.onerror = () => reject(r.error);
+  });
+}
+export async function saveSyncConfig(cfg) {
+  if (useLocalStorage) throw new Error('この環境では共有機能を使えません');
+  const db = await getDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(cfg, SYNC_KEY_NAME); // 暗号鍵(取り出し不可)をそのまま保存できる
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('保存が中断されました'));
+  });
+}
+export async function clearSyncConfig() {
+  if (useLocalStorage) return;
+  const db = await getDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(SYNC_KEY_NAME);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
