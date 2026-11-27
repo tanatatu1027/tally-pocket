@@ -2,7 +2,7 @@
 // 基本の動き: まずネットから最新を取りにいき、取れなければ保存しておいた古いコピーを使う。
 // こうすると、ファイルを直しても古い画面が出続ける事故が起きにくい。
 // (VERSION を上げ忘れても動くが、ファイルを増減したときは上げておくと古いコピーが片づく)
-const VERSION = 'v12';
+const VERSION = 'v13';
 const CACHE = 'shisan-' + VERSION;
 const FILES = [
   './', 'index.html', 'manifest.json', 'css/style.css',
